@@ -1,7 +1,8 @@
-import axios from 'axios';
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import * as path from 'path';
+import axios from 'axios';
+import * as fs from 'fs';
 
 export function activate(context: vscode.ExtensionContext) {
     const diagnosticCollection = vscode.languages.createDiagnosticCollection('pythonTestChecker');
@@ -39,7 +40,24 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(disposable);
+
+    const provider = new PythonTestCodeActionProvider();
+    context.subscriptions.push(vscode.languages.registerCodeActionsProvider('python', provider, {
+        providedCodeActionKinds: PythonTestCodeActionProvider.providedCodeActionKinds
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('extension.createTestCase', async (document: vscode.TextDocument, range: vscode.Range) => {
+        try {
+            const code = document.getText(range);
+            const apiResponse = await sendCodeToApi(code);
+            await appendToTestFile(document.uri.fsPath, apiResponse);
+        } catch (error) {
+            vscode.window.showErrorMessage('Failed to create test case');
+            console.error(error);
+        }
+    }));
 }
+
 
 function getFunctionNames(document: vscode.TextDocument, callback: (functionNames: string[]) => void) {
     const scriptPath = './src/parse_functions.py';
@@ -83,6 +101,7 @@ function parseTestFileUsingPythonScript(filePath: string, callback: (testFunctio
     });
 }
 
+
 function findRangeOfFunctionName(document: vscode.TextDocument, functionName: string): vscode.Range | null {
     const functionDeclaration = `def ${functionName}(`;
     for (let i = 0; i < document.lineCount; i++) {
@@ -95,13 +114,12 @@ function findRangeOfFunctionName(document: vscode.TextDocument, functionName: st
     }
     return null;
 }
-
 // Function to send code to an API
 async function sendCodeToApi(code: string): Promise<any> {
 	try {
 		const data = {
 			model: "gpt-3.5-turbo",
-			messages: [{ "role": "user", "content": code + "Write Unit Test Cases for this using pytest"}]
+			messages: [{ "role": "user", "content": code + "Write Unit Test Cases for this using pytest dont give any comments just the code"}]
 		};
 
 		const config = {
@@ -118,5 +136,31 @@ async function sendCodeToApi(code: string): Promise<any> {
 	}
 }
 
+async function appendToTestFile(viewsFilePath: string, apiResponse: any): Promise<void> {
+    const dir = path.dirname(viewsFilePath);
+    const testFilePath = path.join(dir, 'tests.py');
+    const testContent = apiResponse.choices[0].message.content; // Adjust based on actual response structure
+
+    const existingContent = fs.existsSync(testFilePath) ? fs.readFileSync(testFilePath, 'utf8') : '';
+    fs.writeFileSync(testFilePath, existingContent + "\n" + testContent);
+}
+
+class PythonTestCodeActionProvider implements vscode.CodeActionProvider {
+    public static readonly providedCodeActionKinds = [
+        vscode.CodeActionKind.QuickFix
+    ];
+
+    public provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, context: vscode.CodeActionContext, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeAction[]> {
+        return context.diagnostics
+            .filter(diagnostic => diagnostic.code === 'missing_test')
+            .map(diagnostic => this.createFix(document, range, diagnostic.message));
+    }
+
+    private createFix(document: vscode.TextDocument, range: vscode.Range, diagnosticMessage: string): vscode.CodeAction {
+        const fix = new vscode.CodeAction(`Create test for ${diagnosticMessage}`, vscode.CodeActionKind.QuickFix);
+        fix.command = { title: 'Create Test Case', command: 'extension.createTestCase', arguments: [document, range] };
+        return fix;
+    }
+}
 // This method is called when your extension is deactivated
 export function deactivate() {}
