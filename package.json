@@ -10,22 +10,14 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:test-case-generated.sendCodeToApi"
-    
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "test-case-generated.helloWorld",
-        "title": "Send Code to API"
-      }
-    ]
-  },
   "scripts": {
     "vscode:prepublish": "npm run package",
     "compile": "webpack",
     "watch": "webpack --watch",
+    "build": "webpack --mode production --devtool hidden-source-map",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
