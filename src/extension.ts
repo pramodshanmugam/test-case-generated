@@ -1,27 +1,37 @@
-import * as vscode from 'vscode';
 import axios from 'axios';
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
-// This method is called when your extension is activated
+import { exec } from 'child_process';
+
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Congratulations, your extension "test-case-generated" is now active!');
-
-    let disposable = vscode.workspace.onDidSaveTextDocument(async (document) => {
-		console.log("saved")
-        if (document.fileName.endsWith('views.py')) {
-            const code = document.getText();
-            try {
-                const apiResponse = await sendCodeToApi(code);
-                console.log(apiResponse); // Log the response
-            } catch (error) {
-                vscode.window.showErrorMessage('Error processing your request');
-                console.error(error);
-            }
+    let disposable = vscode.workspace.onDidSaveTextDocument(document => {
+        if (document.languageId !== 'python' || !document.fileName.endsWith('views.py')) {
+            return;
         }
+
+        const scriptPath = './src/parse_functions.py';
+        const command = `python ${scriptPath} ${document.fileName}`;
+
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.error(`Stderr: ${stderr}`);
+                return;
+            }
+
+            const functionNames = JSON.parse(stdout);
+            console.log(functionNames); // Array of function names
+            // Here you can implement logic to check if a test exists for each function
+        });
     });
 
     context.subscriptions.push(disposable);
 }
-
 
 // Function to send code to an API
 async function sendCodeToApi(code: string): Promise<any> {
