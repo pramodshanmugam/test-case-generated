@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const code = editor.document.getText();
 			try {
 				const apiResponse = await sendCodeToApi(code);
-				insertApiResponse(editor, apiResponse);
+				console.log(apiResponse); // Log the response
 			} catch (error) {
 				vscode.window.showErrorMessage('Error processing your request');
 				console.error(error);
@@ -26,22 +26,25 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // Function to send code to an API
-async function sendCodeToApi(code: string): Promise<string> {
+async function sendCodeToApi(code: string): Promise<any> {
 	try {
-		// Replace with your API endpoint and adjust as necessary
-		const response = await axios.post('http://127.0.0.1:8000/endpoint/api/print-data/', { code: code });
-		return response.data; // Adjust this based on how your API responds
+		const data = {
+			model: "gpt-3.5-turbo",
+			messages: [{ "role": "user", "content": code }]
+		};
+
+		const config = {
+			headers: {
+				'Authorization': 'Bearer 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' // Replace with your actual token
+			}
+		};
+
+		const response = await axios.post('https://api.openai.com/v1/chat/completions', data, config);
+		return response.data;
 	} catch (error) {
 		console.error('Error sending code to API:', error);
 		throw error;
 	}
-}
-
-// Function to insert API response into the editor
-function insertApiResponse(editor: vscode.TextEditor, apiResponse: string) {
-	editor.edit(editBuilder => {
-		editBuilder.insert(editor.selection.start, apiResponse);
-	});
 }
 
 // This method is called when your extension is deactivated

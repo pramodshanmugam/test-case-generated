@@ -10,13 +10,14 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:test-case-generated.sendCodeToApi"
     
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "test-case-generated.sendCodeToApi",
+        "command": "test-case-generated.helloWorld",
         "title": "Send Code to API"
       }
     ]
