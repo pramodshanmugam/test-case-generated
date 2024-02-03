@@ -5,8 +5,9 @@ import axios from 'axios';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 
+
 export function activate(context: vscode.ExtensionContext) {
-    const diagnosticCollection = vscode.languages.createDiagnosticCollection('pythonTestChecker');
+    const diagnosticCollection = vscode.languages.createDiagnosticCollection('pythonTestClassChecker');
     context.subscriptions.push(diagnosticCollection);
 
     let disposable = vscode.workspace.onDidSaveTextDocument(async document => {
@@ -14,29 +15,27 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
     
-        let functionNames = await getFunctionNames(document);
+        let classNames = await getClassNames(document);
         let checksums = context.workspaceState.get('checksums', {}) as { [key: string]: string };
     
-        console.log('Function names:', functionNames); // Debugging log
-    
         let newChecksums: { [key: string]: string } = {};
-        for (const funcName of functionNames) {
-            const range = findRangeOfFunctionName(document, funcName);
+        for (const className of classNames) {
+            const range = findRangeOfClassName(document, className);
             if (range) {
-                const functionContent = document.getText(range);
-                console.log(`Content for ${funcName}:`, functionContent);
-                newChecksums[funcName] = calculateChecksum(functionContent);
-                console.log(`Range for ${funcName}:`, range);
-
-                console.log(`Checksum for ${funcName}:`, newChecksums[funcName]); // Debugging log
+                const classContent = document.getText(range);
+                newChecksums[className] = calculateChecksum(classContent);
     
-                if (checksums[funcName] && checksums[funcName] !== newChecksums[funcName]) {
-                    const selection = await vscode.window.showWarningMessage(`Function '${funcName}' has been changed. Regenerate test case?`, 'Yes', 'No');
+                if (checksums[className] && checksums[className] !== newChecksums[className]) {
+                    const selection = await vscode.window.showWarningMessage(`Class '${className}' has been changed. Regenerate test case?`, 'Yes', 'No');
                     if (selection === 'Yes') {
                         try {
-                            const testFunctionName = `test_${funcName}_%`;
-                            const apiResponse = await sendCodeToApi(functionContent);
-                            await replaceInTestFile(document.uri.fsPath, testFunctionName, apiResponse);
+                            const testClassName = `Test${className}`;
+                            const urlsFilePath = path.join(path.dirname(document.uri.fsPath), 'urls.py');
+                            console.log(`classContent: ${classContent}`);
+                            console.log(`urlsFilePath: ${urlsFilePath}`);
+                            const apiResponse = await sendCodeToApi(classContent, urlsFilePath);
+
+                            await replaceInTestFile(document.uri.fsPath, testClassName, apiResponse);
                         } catch (error) {
                             vscode.window.showErrorMessage('Failed to regenerate test case');
                             console.error(error);
@@ -47,9 +46,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         context.workspaceState.update('checksums', newChecksums);
-        updateDiagnostics(document, functionNames, diagnosticCollection);
+        updateDiagnostics(document, classNames, diagnosticCollection);
     });
-
 
     
 
@@ -64,7 +62,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('extension.createTestCase', async (document: vscode.TextDocument, range: vscode.Range) => {
         try {
             const code = document.getText(range);
-            const apiResponse = await sendCodeToApi(code);
+            const urlsFilePath = path.join(path.dirname(document.uri.fsPath), 'urls.py');
+            const apiResponse = await sendCodeToApi(code,urlsFilePath );
             await appendToTestFile(document.uri.fsPath, apiResponse);
         } catch (error) {
             vscode.window.showErrorMessage('Failed to create test case');
@@ -72,17 +71,13 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }));
 }
+function getClassNames(document: vscode.TextDocument): Promise<string[]> {
+    // This function now calls the updated Python script that parses class names
+    // You will need to update the Python script to parse and return class names
+    const scriptPath = './src/parse_classes.py'; // Assume you've created a new script for parsing classes
+    const command = `python3 ${scriptPath} "${document.fileName}"`;
 
-function calculateChecksum(content: crypto.BinaryLike) {
-    return crypto.createHash('sha256') // Create a SHA256 hash object
-               .update(content)        // Update the hash object with the given content
-               .digest('hex');         // Compute the digest in hexadecimal format
-}
-function getFunctionNames(document: vscode.TextDocument): Promise<string[]> {
     return new Promise((resolve, reject) => {
-        const scriptPath = './src/parse_functions.py';
-        const command = `python ${scriptPath} "${document.fileName}"`;
-
         exec(command, (error, stdout, stderr) => {
             if (error) {
                 console.error(`Error: ${error.message}`);
@@ -92,46 +87,39 @@ function getFunctionNames(document: vscode.TextDocument): Promise<string[]> {
                 console.error(`Stderr: ${stderr}`);
                 return reject(new Error(stderr));
             }
-
-            const functionNames = JSON.parse(stdout);
-            resolve(functionNames);
+            const classNames = JSON.parse(stdout);
+            resolve(classNames);
         });
     });
 }
 
-function parseTestFileUsingPythonScript(filePath: string, callback: (testFunctionNames: string[]) => void) {
-    const scriptPath = './src/parse_functions.py';
-    const command = `python ${scriptPath} "${filePath}"`;
-
-    exec(command, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Error: ${error.message}`);
-            callback([]);
-            return;
-        }
-        if (stderr) {
-            console.error(`Stderr: ${stderr}`);
-            callback([]);
-            return;
-        }
-
-        const testFunctionNames = JSON.parse(stdout);
-        callback(testFunctionNames);
-    });
+function calculateChecksum(content: crypto.BinaryLike) {
+    return crypto.createHash('sha256') // Create a SHA256 hash object
+               .update(content)        // Update the hash object with the given content
+               .digest('hex');         // Compute the digest in hexadecimal format
 }
 
 
-function findRangeOfFunctionName(document: vscode.TextDocument, functionName: string): vscode.Range | null {
+
+function findRangeOfClassName(document: vscode.TextDocument, className: string): vscode.Range | null {
     let startLine = -1;
     let endLine = -1;
 
     for (let i = 0; i < document.lineCount; i++) {
         const lineText = document.lineAt(i).text;
 
-        if (lineText.startsWith(`def ${functionName}`) && startLine === -1) {
+        if (lineText.startsWith(`class ${className}`) && startLine === -1) {
             startLine = i;
-        } else if (startLine !== -1 && (lineText.trim() === '' || !lineText.startsWith('    '))) {
-            endLine = i;
+            // Continue to the end of the class definition or until the next class definition starts
+            for (let j = i + 1; j < document.lineCount; j++) {
+                const nextLineText = document.lineAt(j).text;
+                if (nextLineText.startsWith('class ') || j === document.lineCount - 1) {
+                    endLine = j;
+                    break;
+                }
+            }
+        }
+        if (endLine !== -1) {
             break;
         }
     }
@@ -144,27 +132,35 @@ function findRangeOfFunctionName(document: vscode.TextDocument, functionName: st
 
     return null;
 }
-// Function to send code to an API
-async function sendCodeToApi(code: string): Promise<any> {
-	try {
-		const data = {
-			model: "gpt-3.5-turbo",
-			messages: [{ "role": "user", "content": code + "Write Unit Test Cases for this using pytest dont give any comments just the code"}]
-		};
+// Add urlsFilePath as the second parameter
+async function sendCodeToApi(code: string, urlsFilePath: string): Promise<any> {
+    try {
+        // Read urls.py contents
+        const urlsContent = fs.readFileSync(urlsFilePath, 'utf8');
 
-		const config = {
-			headers: {
-				'Authorization': 'Bearer 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' // Replace with your actual token
-			}
-		};
+        // Structure your data including the contents of urls.py
+        const data = {
+            model: "gpt-3.5-turbo-0125",
+            messages: [
+                { "role": "user", "content": code + "Write Unit Test Cases for this class and name the test case as test{classname} for reference the the urls.py file"+ urlsContent + "Give me only the code that can be run directly as response"},
+                // Include urlsContent if needed, format based on API requirement
+            ]
+        };
 
-		const response = await axios.post('https://api.openai.com/v1/chat/completions', data, config);
-		return response.data;
-	} catch (error) {
-		console.error('Error sending code to API:', error);
-		throw error;
-	}
+        const config = {
+            headers: {
+                'Authorization': 'Bearer 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' // Replace with your actual token
+            }
+        };
+
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', data, config);
+        return response.data;
+    } catch (error) {
+        console.error('Error sending code to API:', error);
+        throw error;
+    }
 }
+
 
 async function appendToTestFile(viewsFilePath: string, apiResponse: any): Promise<void> {
     const dir = path.dirname(viewsFilePath);
@@ -182,8 +178,8 @@ class PythonTestCodeActionProvider implements vscode.CodeActionProvider {
 
     public provideCodeActions(document: vscode.TextDocument, range: vscode.Range | vscode.Selection, context: vscode.CodeActionContext, token: vscode.CancellationToken): vscode.ProviderResult<vscode.CodeAction[]> {
         return context.diagnostics
-            .filter(diagnostic => diagnostic.code === 'missing_test')
-            .map(diagnostic => this.createFix(document, range, diagnostic.message));
+            .filter(diagnostic => diagnostic.code === 'missing_test_class')
+            .map(diagnostic => this.createFix(document, diagnostic.range, diagnostic.message));
     }
 
     private createFix(document: vscode.TextDocument, range: vscode.Range, diagnosticMessage: string): vscode.CodeAction {
@@ -192,32 +188,33 @@ class PythonTestCodeActionProvider implements vscode.CodeActionProvider {
         return fix;
     }
 }
+
+
 // This method is called when your extension is deactivated
 export function deactivate() {}
 
-
-function updateDiagnostics(document: vscode.TextDocument, functionNames: string[], diagnosticCollection: vscode.DiagnosticCollection) {
+function updateDiagnostics(document: vscode.TextDocument, classNames: string[], diagnosticCollection: vscode.DiagnosticCollection) {
     const diagnostics: vscode.Diagnostic[] = [];
 
-    functionNames.forEach(funcName => {
-        const testFunctionName = `test_${funcName}`;
-        const hasTest = checkIfTestExists(testFunctionName, document);
+    classNames.forEach(className => {
+        const testClassName = `Test${className}`;
+        const hasTestClass = checkIfTestClassExists(testClassName, document);
 
-        if (!hasTest) {
-            const range = findRangeOfFunctionName(document, funcName);
+        if (!hasTestClass) {
+            const range = findRangeOfClassName(document, className);
             if (range) {
-                // Find the range of just the function name
-                const functionNameRange = new vscode.Range(
+                // Find the range of just the class name (not the whole class body)
+                const classNameRange = new vscode.Range(
                     range.start,
-                    new vscode.Position(range.start.line, range.start.character + `def ${funcName}`.length)
+                    new vscode.Position(range.start.line, range.start.character + `class ${className}`.length)
                 );
 
                 const diagnostic = new vscode.Diagnostic(
-                    functionNameRange, 
-                    `Test for '${funcName}' is missing`, 
+                    classNameRange, 
+                    `Test class for '${className}' is missing`, 
                     vscode.DiagnosticSeverity.Warning
                 );
-                diagnostic.code = 'missing_test';
+                diagnostic.code = 'missing_test_class';
                 diagnostics.push(diagnostic);
             }
         }
@@ -225,6 +222,7 @@ function updateDiagnostics(document: vscode.TextDocument, functionNames: string[
 
     diagnosticCollection.set(document.uri, diagnostics);
 }
+
 async function replaceInTestFile(viewsFilePath: string, funcName: string, apiResponse: { choices: { message: { content: any; }; }[]; }) {
     const dir = path.dirname(viewsFilePath);
     const testFilePath = path.join(dir, 'tests.py');
@@ -257,15 +255,15 @@ async function replaceInTestFile(viewsFilePath: string, funcName: string, apiRes
     fs.writeFileSync(testFilePath, newContent.join('\n'));
 }
 
-function checkIfTestExists(testFunctionName: string, document: vscode.TextDocument): boolean {
+function checkIfTestClassExists(testClassName: string, document: vscode.TextDocument): boolean {
+    // This function would check the entire workspace or a specific test directory for a file that contains the test class
     // Assuming the tests.py file is in the same directory as the document
     const dir = path.dirname(document.uri.fsPath);
-    const testFilePath = path.join(dir, 'tests.py');
+    const testFilePath = path.join(dir, 'tests.py'); // Assumes a naming convention like test_module.py
 
     if (fs.existsSync(testFilePath)) {
         const testFileContent = fs.readFileSync(testFilePath, 'utf8');
-        // Simple check: looking for the test function name in the file
-        return testFileContent.includes(`def ${testFunctionName}(`);
+        return testFileContent.includes(`class ${testClassName}`);
     }
 
     return false;
